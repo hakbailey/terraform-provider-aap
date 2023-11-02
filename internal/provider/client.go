@@ -1,13 +1,17 @@
 package provider
 
 import (
+	"bytes"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 )
+
+var aapSuccessCodes = []int{200, 201, 204}
 
 // Client -
 type AAPClient struct {
@@ -15,6 +19,35 @@ type AAPClient struct {
 	Username           *string
 	Password           *string
 	InsecureSkipVerify bool
+}
+
+// AAP group
+type AapGroup struct {
+	Id          int64    `json:"id"`
+	Inventory   int64    `json:"inventory"`
+	Name        string   `json:"name"`
+	Children    []string `json:"children"`
+	Description string   `json:"description"`
+	Variables   string   `json:"variables"`
+}
+
+// AAP host
+type AapHost struct {
+	Id          int64    `json:"id"`
+	Inventory   int64    `json:"inventory"`
+	Name        string   `json:"name"`
+	Groups      []string `json:"groups"`
+	Description string   `json:"description"`
+	Variables   string   `json:"variables"`
+}
+
+// AAP inventory
+type AapInventory struct {
+	Id           int64  `json:"id"`
+	Organization int64  `json:"organization"`
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	Variables    string `json:"variables"`
 }
 
 // ansible host
@@ -29,8 +62,26 @@ type AnsibleHostList struct {
 	Hosts []AnsibleHost `json:"hosts"`
 }
 
+type PagedGroupsResponse struct {
+	Count    int64      `json:"count"`
+	Next     string     `json:"next"`
+	Previous string     `json:"previous"`
+	Results  []AapGroup `json:"results"`
+}
+
+type PagedHostsResponse struct {
+	Count    int64     `json:"count"`
+	Next     string    `json:"next"`
+	Previous string    `json:"previous"`
+	Results  []AapHost `json:"results"`
+}
+
 // NewClient -
 func NewClient(host string, username *string, password *string, insecure_skip_verify bool) (*AAPClient, error) {
+	if !strings.HasSuffix(host, "/") {
+		host = host + "/"
+	}
+
 	client := AAPClient{
 		HostURL:            host,
 		Username:           username,
@@ -41,14 +92,9 @@ func NewClient(host string, username *string, password *string, insecure_skip_ve
 	return &client, nil
 }
 
-func (c *AAPClient) GetHosts(stateId string) (*AnsibleHostList, error) {
+func (c *AAPClient) MakeRequest(method string, endpoint string, requestBody io.Reader) ([]byte, error) {
+	req, _ := http.NewRequest(method, endpoint, requestBody)
 
-	hostURL := c.HostURL
-	if !strings.HasSuffix(hostURL, "/") {
-		hostURL = hostURL + "/"
-	}
-
-	req, _ := http.NewRequest("GET", hostURL+"api/v2/state/"+stateId+"/", nil)
 	if c.Username != nil && c.Password != nil {
 		req.SetBasicAuth(*c.Username, *c.Password)
 	}
@@ -68,16 +114,134 @@ func (c *AAPClient) GetHosts(stateId string) (*AnsibleHostList, error) {
 
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status: %d, body: %s", resp.StatusCode, body)
+	if !slices.Contains(aapSuccessCodes, resp.StatusCode) {
+		return nil, fmt.Errorf("status: %d, body: %s", resp.StatusCode, responseBody)
+	}
+
+	return responseBody, nil
+}
+
+func (c *AAPClient) AddChildToGroup(groupId string, childGroupId int64) error {
+	requestBody := map[string]int64{"id": childGroupId}
+	var buf bytes.Buffer
+	err := json.NewEncoder(&buf).Encode(requestBody)
+	if err != nil {
+		return err
+	}
+	_, err = c.MakeRequest("POST", c.HostURL+"api/v2/groups/"+groupId+"/children/", &buf)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *AAPClient) AddGroupToHost(hostId string, groupId int64) error {
+	requestBody := map[string]int64{"id": groupId}
+	var buf bytes.Buffer
+	err := json.NewEncoder(&buf).Encode(requestBody)
+	if err != nil {
+		return err
+	}
+	_, err = c.MakeRequest("POST", c.HostURL+"api/v2/hosts/"+hostId+"/groups/", &buf)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *AAPClient) CreateGroup(requestBody io.Reader) (*AapGroup, error) {
+
+	response, err := c.MakeRequest("POST", c.HostURL+"api/v2/groups/", requestBody)
+	if err != nil {
+		return nil, err
+	}
+
+	return ParseGroupResponse(response)
+}
+
+func (c *AAPClient) CreateHost(requestBody io.Reader) (*AapHost, error) {
+
+	response, err := c.MakeRequest("POST", c.HostURL+"api/v2/hosts/", requestBody)
+	if err != nil {
+		return nil, err
+	}
+
+	return ParseHostResponse(response)
+}
+
+func (c *AAPClient) CreateInventory(requestBody io.Reader) (*AapInventory, error) {
+
+	response, err := c.MakeRequest("POST", c.HostURL+"api/v2/inventories/", requestBody)
+	if err != nil {
+		return nil, err
+	}
+
+	return ParseInventoryResponse(response)
+}
+
+func (c *AAPClient) GetGroupChildren(groupId string) ([]AapGroup, error) {
+	body, err := c.MakeRequest("GET", c.HostURL+"api/v2/groups/"+groupId+"/children", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return ParsePagedGroupsResponse(body)
+}
+
+func (c *AAPClient) GetHostGroups(hostId string) ([]AapGroup, error) {
+	body, err := c.MakeRequest("GET", c.HostURL+"api/v2/hosts/"+hostId+"/groups", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return ParsePagedGroupsResponse(body)
+}
+
+func (c *AAPClient) GetHosts(stateId string) (*AnsibleHostList, error) {
+
+	body, err := c.MakeRequest("GET", c.HostURL+"api/v2/state/"+stateId+"/", nil)
+	if err != nil {
+		return nil, err
 	}
 
 	return GetAnsibleHost(body)
+}
+
+func (c *AAPClient) GetInventory(inventoryId string) (*AapInventory, error) {
+
+	response, err := c.MakeRequest("GET", c.HostURL+"api/v2/inventories/"+inventoryId+"/", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return ParseInventoryResponse(response)
+}
+
+func (c *AAPClient) GetInventoryGroups(inventoryId string) ([]AapGroup, error) {
+
+	response, err := c.MakeRequest("GET", c.HostURL+"api/v2/inventories/"+inventoryId+"/groups/", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return ParsePagedGroupsResponse(response)
+}
+
+func (c *AAPClient) GetInventoryHosts(inventoryId string) ([]AapHost, error) {
+
+	response, err := c.MakeRequest("GET", c.HostURL+"api/v2/inventories/"+inventoryId+"/hosts/", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return ParsePagedHostsResponse(response)
 }
 
 func GetAnsibleHost(body []byte) (*AnsibleHostList, error) {
@@ -121,4 +285,62 @@ func GetAnsibleHost(body []byte) (*AnsibleHostList, error) {
 		}
 	}
 	return &hosts, nil
+}
+
+func ParseGroupResponse(body []byte) (*AapGroup, error) {
+
+	var result AapGroup
+
+	err := json.Unmarshal(body, &result)
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+func ParseHostResponse(body []byte) (*AapHost, error) {
+
+	var result AapHost
+
+	err := json.Unmarshal(body, &result)
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+func ParseInventoryResponse(body []byte) (*AapInventory, error) {
+
+	var result AapInventory
+
+	err := json.Unmarshal(body, &result)
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+func ParsePagedGroupsResponse(body []byte) ([]AapGroup, error) {
+
+	var groupsResponse PagedGroupsResponse
+	err := json.Unmarshal(body, &groupsResponse)
+	if err != nil {
+		return nil, err
+	}
+
+	return groupsResponse.Results, nil // TODO: Handling paged responses, currently only returning first page
+}
+
+func ParsePagedHostsResponse(body []byte) ([]AapHost, error) {
+
+	var hostsResponse PagedHostsResponse
+	err := json.Unmarshal(body, &hostsResponse)
+	if err != nil {
+		return nil, err
+	}
+
+	return hostsResponse.Results, nil // TODO: Handling paged responses, currently only returning first page
 }
