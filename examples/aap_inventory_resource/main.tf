@@ -18,8 +18,8 @@ resource "aap_aap_inventory" "my_inventory" {
   description = "A new inventory for testing"
   groups = [
     {
-      name = "My new group"
-      children = ["Group 2"]
+      name = "Group A"
+      children = ["Group B", "Group C"]
       description = "A new group for testing"
       variables = {
         groupvar1 = "foo"
@@ -27,23 +27,27 @@ resource "aap_aap_inventory" "my_inventory" {
       }
     },
     {
-    name = "Group 2"
-    description = "A second new group for testing"
-    variables = {
-      groupvar1 = "foo"
-      groupvar2 = "bar"
-    }
-  }
+      name = "Group B"
+    },
+    {
+      name = "Group C"
+    },
   ]
   hosts = [
     {
-      name = "My new host"
+      name = "Host A"
       description = "A new host for testing"
-      groups = [ "My new group", "Group 2" ]
+      groups = [ "Group A", "Group B" ]
       variables = {
         hostvar1 = "foo"
         hostvar2 = "bar"
       }
+    },
+    {
+      name = "Host B"
+    },
+    {
+      name = "Host C"
     }
   ]
   variables = {

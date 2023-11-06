@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-var aapSuccessCodes = []int{200, 201, 204}
+var aapSuccessCodes = []int{200, 201, 202, 204}
 
 // Client -
 type AAPClient struct {
@@ -60,6 +60,11 @@ type AnsibleHost struct {
 // ansible host list
 type AnsibleHostList struct {
 	Hosts []AnsibleHost `json:"hosts"`
+}
+
+type DisassociateRequest struct {
+	Id           int64 `json:"id"`
+	Disassociate bool  `json:"disassociate"`
 }
 
 type PagedGroupsResponse struct {
@@ -186,32 +191,70 @@ func (c *AAPClient) CreateInventory(requestBody io.Reader) (*AapInventory, error
 	return ParseInventoryResponse(response)
 }
 
-func (c *AAPClient) GetGroupChildren(groupId string) ([]AapGroup, error) {
-	body, err := c.MakeRequest("GET", c.HostURL+"api/v2/groups/"+groupId+"/children", nil)
+func (c *AAPClient) DeleteGroup(groupId string) error {
+	_, err := c.MakeRequest("DELETE", c.HostURL+"api/v2/groups/"+groupId+"/", nil)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *AAPClient) DeleteHost(hostId string) error {
+	_, err := c.MakeRequest("DELETE", c.HostURL+"api/v2/hosts/"+hostId+"/", nil)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *AAPClient) DeleteInventory(inventoryId string) error {
+	_, err := c.MakeRequest("DELETE", c.HostURL+"api/v2/inventories/"+inventoryId+"/", nil)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *AAPClient) GetGroup(groupId string) (*AapGroup, error) {
+	response, err := c.MakeRequest("GET", c.HostURL+"api/v2/groups/"+groupId+"/", nil)
 	if err != nil {
 		return nil, err
 	}
 
-	return ParsePagedGroupsResponse(body)
+	return ParseGroupResponse(response)
+}
+
+func (c *AAPClient) GetGroupChildren(groupId string) ([]AapGroup, error) {
+
+	response, err := c.MakeRequest("GET", c.HostURL+"api/v2/groups/"+groupId+"/children", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return ParsePagedGroupsResponse(response)
 }
 
 func (c *AAPClient) GetHostGroups(hostId string) ([]AapGroup, error) {
-	body, err := c.MakeRequest("GET", c.HostURL+"api/v2/hosts/"+hostId+"/groups", nil)
+
+	response, err := c.MakeRequest("GET", c.HostURL+"api/v2/hosts/"+hostId+"/groups", nil)
 	if err != nil {
 		return nil, err
 	}
 
-	return ParsePagedGroupsResponse(body)
+	return ParsePagedGroupsResponse(response)
 }
 
 func (c *AAPClient) GetHosts(stateId string) (*AnsibleHostList, error) {
 
-	body, err := c.MakeRequest("GET", c.HostURL+"api/v2/state/"+stateId+"/", nil)
+	response, err := c.MakeRequest("GET", c.HostURL+"api/v2/state/"+stateId+"/", nil)
 	if err != nil {
 		return nil, err
 	}
 
-	return GetAnsibleHost(body)
+	return GetAnsibleHost(response)
 }
 
 func (c *AAPClient) GetInventory(inventoryId string) (*AapInventory, error) {
@@ -243,6 +286,67 @@ func (c *AAPClient) GetInventoryHosts(inventoryId string) ([]AapHost, error) {
 
 	return ParsePagedHostsResponse(response)
 }
+
+func (c *AAPClient) RemoveChildFromGroup(groupId string, childGroupId int64) error {
+	requestBody := DisassociateRequest{Id: childGroupId, Disassociate: true}
+	var buf bytes.Buffer
+	err := json.NewEncoder(&buf).Encode(requestBody)
+	if err != nil {
+		return err
+	}
+	_, err = c.MakeRequest("POST", c.HostURL+"api/v2/groups/"+groupId+"/children/", &buf)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *AAPClient) RemoveGroupFromHost(hostId string, groupId int64) error {
+	requestBody := DisassociateRequest{Id: groupId, Disassociate: true}
+	var buf bytes.Buffer
+	err := json.NewEncoder(&buf).Encode(requestBody)
+	if err != nil {
+		return err
+	}
+	_, err = c.MakeRequest("POST", c.HostURL+"api/v2/hosts/"+hostId+"/groups/", &buf)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *AAPClient) UpdateGroup(groupId string, requestBody io.Reader) (*AapGroup, error) {
+
+	response, err := c.MakeRequest("PUT", c.HostURL+"api/v2/groups/"+groupId+"/", requestBody)
+	if err != nil {
+		return nil, err
+	}
+
+	return ParseGroupResponse(response)
+}
+
+func (c *AAPClient) UpdateHost(hostId string, requestBody io.Reader) (*AapHost, error) {
+
+	response, err := c.MakeRequest("PUT", c.HostURL+"api/v2/hosts/"+hostId+"/", requestBody)
+	if err != nil {
+		return nil, err
+	}
+
+	return ParseHostResponse(response)
+}
+
+func (c *AAPClient) UpdateInventory(inventoryId string, requestBody io.Reader) (*AapInventory, error) {
+
+	response, err := c.MakeRequest("PUT", c.HostURL+"api/v2/inventories/"+inventoryId+"/", requestBody)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInventoryResponse(response)
+}
+
+// Parse responses
 
 func GetAnsibleHost(body []byte) (*AnsibleHostList, error) {
 

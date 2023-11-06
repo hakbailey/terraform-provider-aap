@@ -5,12 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
@@ -42,9 +45,15 @@ func (r *aapInventoryResource) Schema(_ context.Context, _ resource.SchemaReques
 		Attributes: map[string]schema.Attribute{
 			"id": schema.Int64Attribute{
 				Computed: true,
+				PlanModifiers: []planmodifier.Int64{
+					int64planmodifier.UseStateForUnknown(),
+				},
 			},
 			"organization": schema.Int64Attribute{
 				Computed: true,
+				PlanModifiers: []planmodifier.Int64{
+					int64planmodifier.UseStateForUnknown(),
+				},
 			},
 			"name": schema.StringAttribute{
 				Required: true,
@@ -62,9 +71,15 @@ func (r *aapInventoryResource) Schema(_ context.Context, _ resource.SchemaReques
 					Attributes: map[string]schema.Attribute{
 						"id": schema.Int64Attribute{
 							Computed: true,
+							PlanModifiers: []planmodifier.Int64{
+								int64planmodifier.UseStateForUnknown(),
+							},
 						},
 						"inventory": schema.Int64Attribute{
 							Computed: true,
+							PlanModifiers: []planmodifier.Int64{
+								int64planmodifier.UseStateForUnknown(),
+							},
 						},
 						"name": schema.StringAttribute{
 							Required: true,
@@ -89,9 +104,15 @@ func (r *aapInventoryResource) Schema(_ context.Context, _ resource.SchemaReques
 					Attributes: map[string]schema.Attribute{
 						"id": schema.Int64Attribute{
 							Computed: true,
+							PlanModifiers: []planmodifier.Int64{
+								int64planmodifier.UseStateForUnknown(),
+							},
 						},
 						"inventory": schema.Int64Attribute{
 							Computed: true,
+							PlanModifiers: []planmodifier.Int64{
+								int64planmodifier.UseStateForUnknown(),
+							},
 						},
 						"name": schema.StringAttribute{
 							Required: true,
@@ -116,9 +137,9 @@ func (r *aapInventoryResource) Schema(_ context.Context, _ resource.SchemaReques
 
 // Create creates the resource and sets the new Terraform state on success.
 func (r *aapInventoryResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	// Get current state
-	var state aapInventoryResourceModel
-	diags := req.Plan.Get(ctx, &state)
+	// Retrieve values from plan
+	var plan aapInventoryResourceModel
+	diags := req.Plan.Get(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -127,12 +148,12 @@ func (r *aapInventoryResource) Create(ctx context.Context, req resource.CreateRe
 	// Convert state resource to API request model
 	inventory := AapInventory{
 		Organization: 1, // TODO: Using default organization for now, need to update
-		Name:         state.Name.ValueString(),
-		Description:  state.Description.ValueString(),
+		Name:         plan.Name.ValueString(),
+		Description:  plan.Description.ValueString(),
 	}
 
 	// Convert inventory variables to API request model
-	variables, diags := VariablesMapToString(ctx, state.Variables)
+	variables, diags := VariablesMapToString(ctx, plan.Variables)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -161,13 +182,13 @@ func (r *aapInventoryResource) Create(ctx context.Context, req resource.CreateRe
 	}
 
 	// Map response body to resource schema and populate computed attribute values
-	state.ID = types.Int64Value(newInventory.Id)
-	state.Organization = types.Int64Value(newInventory.Organization)
-	state.Name = types.StringValue(newInventory.Name)
+	plan.ID = types.Int64Value(newInventory.Id)
+	plan.Organization = types.Int64Value(newInventory.Organization)
+	plan.Name = types.StringValue(newInventory.Name)
 	if newInventory.Description != "" {
-		state.Description = types.StringValue(newInventory.Description)
+		plan.Description = types.StringValue(newInventory.Description)
 	} else {
-		state.Description = types.StringNull()
+		plan.Description = types.StringNull()
 	}
 
 	newVariables, diags := VariablesStringToMap(ctx, newInventory.Variables)
@@ -175,15 +196,15 @@ func (r *aapInventoryResource) Create(ctx context.Context, req resource.CreateRe
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	state.Variables = newVariables
+	plan.Variables = newVariables
 
 	/////////////////////////////
 	// Create inventory groups //
 	/////////////////////////////
 
 	// Convert inventory groups set to slice of Objects
-	groups := make([]types.Object, 0, len(state.Groups.Elements()))
-	diags = state.Groups.ElementsAs(ctx, &groups, false)
+	groups := make([]types.Object, 0, len(plan.Groups.Elements()))
+	diags = plan.Groups.ElementsAs(ctx, &groups, false)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -208,7 +229,7 @@ func (r *aapInventoryResource) Create(ctx context.Context, req resource.CreateRe
 		}
 
 		group := AapGroup{
-			Inventory:   state.ID.ValueInt64(),
+			Inventory:   plan.ID.ValueInt64(),
 			Name:        groupResource.Name.ValueString(),
 			Description: groupResource.Description.ValueString(),
 			Variables:   variables,
@@ -286,15 +307,15 @@ func (r *aapInventoryResource) Create(ctx context.Context, req resource.CreateRe
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	state.Groups = stateGroups
+	plan.Groups = stateGroups
 
 	////////////////////////////
 	// Create inventory hosts //
 	////////////////////////////
 
 	// Convert inventory host set to slice of Objects
-	hosts := make([]types.Object, 0, len(state.Hosts.Elements()))
-	diags = state.Hosts.ElementsAs(ctx, &hosts, false)
+	hosts := make([]types.Object, 0, len(plan.Hosts.Elements()))
+	diags = plan.Hosts.ElementsAs(ctx, &hosts, false)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -319,7 +340,7 @@ func (r *aapInventoryResource) Create(ctx context.Context, req resource.CreateRe
 		}
 
 		host := AapHost{
-			Inventory:   state.ID.ValueInt64(),
+			Inventory:   plan.ID.ValueInt64(),
 			Name:        hostResource.Name.ValueString(),
 			Description: hostResource.Description.ValueString(),
 			Variables:   variables,
@@ -398,10 +419,10 @@ func (r *aapInventoryResource) Create(ctx context.Context, req resource.CreateRe
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	state.Hosts = stateHosts
+	plan.Hosts = stateHosts
 
 	// Set state to fully populated inventory data
-	diags = resp.State.Set(ctx, state)
+	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -547,10 +568,461 @@ func (r *aapInventoryResource) Read(ctx context.Context, req resource.ReadReques
 
 // Update updates the resource and sets the updated Terraform state on success.
 func (r *aapInventoryResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	// Retrieve values from plan
+	var plan aapInventoryResourceModel
+	diags := req.Plan.Get(ctx, &plan)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Convert plan resource to API request model
+	inventory := AapInventory{
+		Organization: plan.Organization.ValueInt64(),
+		Name:         plan.Name.ValueString(),
+		Description:  plan.Description.ValueString(),
+	}
+
+	// Convert inventory variables to API request model
+	variables, diags := VariablesMapToString(ctx, plan.Variables)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	inventory.Variables = variables
+
+	// Generate API request body
+	var buf bytes.Buffer
+	err := json.NewEncoder(&buf).Encode(inventory)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error generating AAP inventory request body",
+			"Could not generate request body to update AAP inventory, unexpected error: "+err.Error(),
+		)
+		return
+	}
+
+	// Update inventory in AAP
+	inventoryId := strconv.Itoa(int(plan.ID.ValueInt64()))
+	updatedInventory, err := r.client.UpdateInventory(inventoryId, &buf)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error updating AAP inventory",
+			"Could not update AAP inventory, unexpected error: "+err.Error(),
+		)
+		return
+	}
+
+	// Map response body to resource schema and populate computed attribute values
+	plan.ID = types.Int64Value(updatedInventory.Id)
+	plan.Organization = types.Int64Value(updatedInventory.Organization)
+	plan.Name = types.StringValue(updatedInventory.Name)
+	if updatedInventory.Description != "" {
+		plan.Description = types.StringValue(updatedInventory.Description)
+	} else {
+		plan.Description = types.StringNull()
+	}
+
+	updatedVariables, diags := VariablesStringToMap(ctx, updatedInventory.Variables)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	plan.Variables = updatedVariables
+
+	/////////////////////////////
+	// Update inventory groups //
+	/////////////////////////////
+
+	// Get inventory's current groups
+	currentGroups, err := r.client.GetInventoryGroups(inventoryId)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error retrieving groups for inventory",
+			"Could not retrieve groups for inventory "+inventory.Name+", unexpected error: "+err.Error(),
+		)
+		return
+	}
+
+	// Convert plan inventory groups set to slice of Objects
+	groups := make([]types.Object, 0, len(plan.Groups.Elements()))
+	diags = plan.Groups.ElementsAs(ctx, &groups, false)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	var updatedGroups []AapGroup
+
+	// Create or update groups in plan
+	for _, g := range groups {
+		// Read group data into resource model
+		var groupResource aapGroupResourceModel
+		diags := g.As(ctx, &groupResource, basetypes.ObjectAsOptions{})
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		// Convert group resource to API request model
+		variables, diags := VariablesMapToString(ctx, groupResource.Variables)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		group := AapGroup{
+			Inventory:   plan.ID.ValueInt64(),
+			Name:        groupResource.Name.ValueString(),
+			Description: groupResource.Description.ValueString(),
+			Variables:   variables,
+		}
+
+		// Generate API request body
+		var buf bytes.Buffer
+		err = json.NewEncoder(&buf).Encode(group)
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Error generating AAP group request body",
+				"Could not generate request body to update AAP group, unexpected error: "+err.Error(),
+			)
+			return
+		}
+
+		var updatedGroup *AapGroup
+		groupId := groupResource.ID.ValueInt64()
+
+		// If group is not in current inventory groups create it, otherwise update it
+		groupIndex := slices.IndexFunc(currentGroups, func(g AapGroup) bool { return g.Id == groupId })
+		if groupIndex == -1 {
+			updatedGroup, err = r.client.CreateGroup(&buf)
+			if err != nil {
+				resp.Diagnostics.AddError(
+					"Error creating AAP group",
+					"Could not create AAP group "+group.Name+", unexpected error: "+err.Error(),
+				)
+				return
+			}
+		} else {
+			updatedGroup, err = r.client.UpdateGroup(strconv.Itoa(int(groupId)), &buf)
+			if err != nil {
+				resp.Diagnostics.AddError(
+					"Error updating AAP group",
+					"Could not update AAP group "+group.Name+", unexpected error: "+err.Error(),
+				)
+				return
+			}
+		}
+
+		// Update group struct values for later reference
+		group.Id = updatedGroup.Id
+
+		children := make([]string, 0, len(groupResource.Children.Elements()))
+		diags = groupResource.Children.ElementsAs(ctx, &children, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		group.Children = children
+
+		updatedGroups = append(updatedGroups, group)
+	}
+
+	// If any current inventory groups are not in updated plan groups, delete them
+	for _, currentGroup := range currentGroups {
+		groupIndex := slices.IndexFunc(updatedGroups, func(g AapGroup) bool { return g.Id == currentGroup.Id })
+		if groupIndex == -1 {
+			groupId := strconv.Itoa(int(currentGroup.Id))
+			err = r.client.DeleteGroup(groupId)
+			if err != nil {
+				resp.Diagnostics.AddError(
+					"Error deleting group",
+					"Could not delete group "+currentGroup.Name+", unexpected error: "+err.Error(),
+				)
+				return
+			}
+		}
+	}
+
+	// Ensure all parent groups have updated children
+	for _, group := range updatedGroups {
+		groupId := strconv.Itoa(int(group.Id))
+
+		// Get group's current children
+		currentChildren, err := r.client.GetGroupChildren(groupId)
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Error retrieving current children for group",
+				"Could not retrieve current children for group "+group.Name+", unexpected error: "+err.Error(),
+			)
+			return
+		}
+
+		// If any updated children are not in current children, add them to group
+		for _, childName := range group.Children {
+			childIndex := slices.IndexFunc(currentChildren, func(g AapGroup) bool { return g.Name == childName })
+
+			if childIndex == -1 {
+				childId, err := GroupIdFromName(childName, updatedGroups)
+				if err != nil {
+					resp.Diagnostics.AddError(
+						"Error retrieving group ID",
+						"Could not retrieve ID for child group "+childName+", unexpected error: "+err.Error(),
+					)
+					return
+				}
+
+				err = r.client.AddChildToGroup(groupId, childId)
+				if err != nil {
+					resp.Diagnostics.AddError(
+						"Error adding child to group",
+						"Could not add child "+childName+" to group "+group.Name+", unexpected error: "+err.Error(),
+					)
+					return
+				}
+			}
+		}
+
+		// If any current children are not in updated children, remove them from group
+		for _, child := range currentChildren {
+			containsChild := slices.Contains(group.Children, child.Name)
+			if !containsChild {
+				err = r.client.RemoveChildFromGroup(groupId, child.Id)
+				if err != nil {
+					resp.Diagnostics.AddError(
+						"Error removing child from group",
+						"Could not remove child "+child.Name+" from group "+group.Name+", unexpected error: "+err.Error(),
+					)
+					return
+				}
+			}
+		}
+	}
+
+	// 	Map updated groups to schema and update state
+	schemaGroups, diags := GroupsToSchema(ctx, updatedGroups)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	updatedStateGroups, diags := types.SetValueFrom(ctx, types.ObjectType{AttrTypes: groupTypes}, schemaGroups)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	plan.Groups = updatedStateGroups
+
+	////////////////////////////
+	// Update inventory hosts //
+	////////////////////////////
+
+	// Get inventory's current hosts
+	currentHosts, err := r.client.GetInventoryHosts(inventoryId)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error retrieving hosts for inventory",
+			"Could not retrieve hosts for inventory "+inventory.Name+", unexpected error: "+err.Error(),
+		)
+		return
+	}
+
+	// Convert plan inventory hosts set to slice of Objects
+	hosts := make([]types.Object, 0, len(plan.Hosts.Elements()))
+	diags = plan.Hosts.ElementsAs(ctx, &hosts, false)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	var updatedHosts []AapHost
+
+	for _, h := range hosts {
+		// Read host data into resource model
+		var hostResource aapHostResourceModel
+		diags := h.As(ctx, &hostResource, basetypes.ObjectAsOptions{})
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		// Convert host resource to API request model
+		variables, diags := VariablesMapToString(ctx, hostResource.Variables)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		host := AapHost{
+			Inventory:   plan.ID.ValueInt64(),
+			Name:        hostResource.Name.ValueString(),
+			Description: hostResource.Description.ValueString(),
+			Variables:   variables,
+		}
+
+		// Generate API request body
+		var buf bytes.Buffer
+		err = json.NewEncoder(&buf).Encode(host)
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Error generating AAP host request body",
+				"Could not generate request body to update AAP host, unexpected error: "+err.Error(),
+			)
+			return
+		}
+
+		hostId := hostResource.Id.ValueInt64()
+		var updatedHost *AapHost
+
+		// If host is not in current inventory hosts create it, otherwise update it
+		hostIndex := slices.IndexFunc(currentHosts, func(h AapHost) bool { return h.Id == hostId })
+		if hostIndex == -1 {
+			updatedHost, err = r.client.CreateHost(&buf)
+			if err != nil {
+				resp.Diagnostics.AddError(
+					"Error creating AAP host",
+					"Could not create AAP host "+host.Name+", unexpected error: "+err.Error(),
+				)
+				return
+			}
+		} else {
+			updatedHost, err = r.client.UpdateHost(strconv.Itoa(int(hostId)), &buf)
+			if err != nil {
+				resp.Diagnostics.AddError(
+					"Error updating AAP host",
+					"Could not update AAP host "+host.Name+", unexpected error: "+err.Error(),
+				)
+				return
+			}
+		}
+
+		// Update host struct values for later reference
+		host.Id = updatedHost.Id
+
+		hostGroups := make([]string, 0, len(hostResource.Groups.Elements()))
+		diags = hostResource.Groups.ElementsAs(ctx, &hostGroups, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		host.Groups = hostGroups
+
+		updatedHosts = append(updatedHosts, host)
+	}
+
+	// If any current inventory hosts are not in updated plan hosts, delete them
+	for _, currentHost := range currentHosts {
+		hostIndex := slices.IndexFunc(updatedHosts, func(h AapHost) bool { return h.Id == currentHost.Id })
+		if hostIndex == -1 {
+			hostId := strconv.Itoa(int(currentHost.Id))
+			err = r.client.DeleteHost(hostId)
+			if err != nil {
+				resp.Diagnostics.AddError(
+					"Error deleting group",
+					"Could not delete group "+currentHost.Name+", unexpected error: "+err.Error(),
+				)
+				return
+			}
+		}
+	}
+
+	// Ensure all hosts have updated groups
+	for _, host := range updatedHosts {
+		hostId := strconv.Itoa(int(host.Id))
+
+		// Get hosts's current groups
+		currentHostGroups, err := r.client.GetHostGroups(hostId)
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Error retrieving current groups for host",
+				"Could not retrieve current groups for host "+host.Name+", unexpected error: "+err.Error(),
+			)
+			return
+		}
+
+		// If any updated host groups are not in current host groups, add them to host
+		for _, groupName := range host.Groups {
+			groupIndex := slices.IndexFunc(currentHostGroups, func(g AapGroup) bool { return g.Name == groupName })
+
+			if groupIndex == -1 {
+				hostGroupId, err := GroupIdFromName(groupName, updatedGroups)
+				if err != nil {
+					resp.Diagnostics.AddError(
+						"Error retrieving group ID",
+						"Could not retrieve ID for host group "+groupName+", unexpected error: "+err.Error(),
+					)
+					return
+				}
+
+				err = r.client.AddGroupToHost(hostId, hostGroupId)
+				if err != nil {
+					resp.Diagnostics.AddError(
+						"Error adding group to host",
+						"Could not add group "+groupName+" to host "+host.Name+", unexpected error: "+err.Error(),
+					)
+					return
+				}
+			}
+		}
+
+		// If any current host groups are not in updated host groups, remove them from host
+		for _, hostGroup := range currentHostGroups {
+			containsGroup := slices.Contains(host.Groups, hostGroup.Name)
+			if !containsGroup {
+				err = r.client.RemoveGroupFromHost(hostId, hostGroup.Id)
+				if err != nil {
+					resp.Diagnostics.AddError(
+						"Error removing group from host",
+						"Could not remove group "+hostGroup.Name+" from host "+host.Name+", unexpected error: "+err.Error(),
+					)
+					return
+				}
+			}
+		}
+	}
+
+	// 	Map updated hosts back to schema and update state
+	schemaHosts, diags := HostsToSchema(ctx, updatedHosts)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	updatedStateHosts, diags := types.SetValueFrom(ctx, types.ObjectType{AttrTypes: hostTypes}, schemaHosts)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	plan.Hosts = updatedStateHosts
+
+	// Set state to fully populated inventory data
+	diags = resp.State.Set(ctx, plan)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 }
 
 // Delete deletes the resource and removes the Terraform state on success.
 func (r *aapInventoryResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	// Get current state
+	var state aapInventoryResourceModel
+	diags := req.State.Get(ctx, &state)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Delete inventory from AAP
+	err := r.client.DeleteInventory(state.ID.String())
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Error deleting AAP inventory",
+			"Could not delete AAP inventory with ID "+state.ID.String()+": "+err.Error(),
+		)
+		return
+	}
 }
 
 // Configure adds the provider configured client to the resource.
